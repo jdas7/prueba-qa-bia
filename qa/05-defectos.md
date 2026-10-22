@@ -69,6 +69,10 @@ UI: "8 normales · 2 alerta · 2 críticas" y M-106 con el sello "Alerta" en el 
 
 **Evidencia:** [reporte de evidencias](evidencias/index.html), buscar `@DEF-01`: las respuestas de `getById/M-106`, `getAll` con `status: alert` y `getSummary` están adjuntas a cada paso.
 
+**Causa raíz:** `backend/internal/meter/enums.go` líneas 29–38, `StatusOf`. El comentario promete la regla del falso positivo pero el `switch` no tiene esa rama: `FALSE_POSITIVE` (LOW) cae en `default` → `ALERT`. El motor sí marca bien `anomaly: false` (`classify.go` línea 197); el dato se pierde al traducirlo a estado. `TestStatusOf` no tiene el caso y `TestDashboardSummary` (`server_test.go` línea 131) afirma 8/2/2, es decir, fija el bug.
+
+**Detección automática:** caso `FALSE_POSITIVE` en la tabla de `TestStatusOf`; corregir `TestDashboardSummary` a 9/1/2; Playwright [`clasificacion-estado.feature`](../e2e/features/api/clasificacion-estado.feature) recorre la tabla de decisión tipo → estado contra la API como un Esquema del escenario. La fila de M-106 y los conteos 9/1/2 llevan `@fail @DEF-01`.
+
 ---
 
 ## DEF-02 · La UI convierte la hora de planta a la zona del navegador: en Colombia todas las horas salen 5 h antes y algunas cambian de día
@@ -86,7 +90,7 @@ UI: "8 normales · 2 alerta · 2 críticas" y M-106 con el sello "Alerta" en el 
 
 **Datos:** API `detected_at` M-109 `2026-09-12T14:00:00Z`, M-112 `2026-09-13T00:00:00Z`, M-104 `2026-09-11T00:00:00Z`, M-106 `2026-09-08T00:00:00Z`; `last_reading_at` `2026-09-14T23:00:00Z`.
 
-**Resultado esperado:** PR Operating Context: "Timestamps have no time zone (plant time). Show them exactly as received; never convert them to the browser's time zone." FR Diseño: "se muestran tal como vienen, sin convertirlas a la zona del navegador". La UI debe mostrar 12/09 14:00, 13/09 00:00, 11/09 00:00, 08/09 00:00 y 14/09 23:00.
+**Resultado esperado:** PR Operating Context: "Timestamps have no time zone (plant time). Show them exactly as received; never convert them to the browser's time zone." Diseño: "se muestran tal como vienen, sin convertirlas a la zona del navegador". La UI debe mostrar 12/09 14:00, 13/09 00:00, 11/09 00:00, 08/09 00:00 y 14/09 23:00.
 
 **Resultado obtenido (Bogotá):**
 
@@ -100,6 +104,10 @@ UI: "8 normales · 2 alerta · 2 críticas" y M-106 con el sello "Alerta" en el 
 | Evento M-109 / "Desde" de la ventana | 12/09 14:00 | **12/09 09:00** | 12/09 14:00 |
 
 **Evidencia:** [reporte de evidencias](evidencias/index.html), buscar `@DEF-02`: captura de Anomalías IA en Bogotá con "Detectada 12/09 09:00" junto a "desde 12/09 14:00". El control `@utc` muestra la misma pantalla con el navegador en UTC y las horas correctas.
+
+**Causa raíz:** `frontend/src/lib/format.ts` líneas 55–58, `formatPlantTime` usa `getDate()`, `getMonth()`, `getHours()` y `getMinutes()` (hora local) aunque el comentario de las líneas 51–52 pide las partes UTC, como ya hacen `formatPlantDate` y `formatPlantDay`. No lo detecta `format.test.ts` porque `vite.config.ts` línea 33 fija `TZ: 'UTC'` para los tests.
+
+**Detección automática:** Vitest con `TZ=America/Bogota` (`format.qa.test.ts`); Playwright con `timezoneId: 'America/Bogota'` comparando la hora de la UI con `detected_at` de la API ([`hora-planta.feature`](../e2e/features/ui/hora-planta.feature), escenarios con `@fail`; el control `@utc` con el navegador en UTC pasa).
 
 ---
 
@@ -122,6 +130,10 @@ UI: "8 normales · 2 alerta · 2 críticas" y M-106 con el sello "Alerta" en el 
 
 **Evidencia:** [reporte de evidencias](evidencias/index.html), buscar `@DEF-03`: captura del pie "1–10 de 12 medidores" con "Siguiente" deshabilitado. La API sí devuelve la página 2 (`@CN-06`, fila página 2 de tamaño 10).
 
+**Causa raíz:** `frontend/src/features/meters/components/Pagination.tsx` línea 13: `Math.floor(count / size)` da 1 para 12/10; debe ser `Math.ceil`. Falla siempre que `count` no sea múltiplo de 10.
+
+**Detección automática:** Vitest `Pagination.qa.test.tsx` (12 de 10 → "Siguiente" habilitado); Playwright [`paginacion-libro.feature`](../e2e/features/ui/paginacion-libro.feature) (llegar a M-112 con "Siguiente", escenario con `@fail`).
+
 ---
 
 ## DEF-04 · La búsqueda por medidor distingue mayúsculas: "m-109" no encuentra M-109
@@ -140,6 +152,10 @@ UI: "8 normales · 2 alerta · 2 críticas" y M-106 con el sello "Alerta" en el 
 **Resultado obtenido:** `"M-109"` → 1 fila, `"109"` → 1 fila, **`"m-109"` → `count: 0`**. UI: "Ningún medidor coincide con los filtros" con la URL `?medidor=m-109` (la UI envía bien el texto). Contraste: `GET /meter/getById/m-109` sí responde 200 y el filtro `status: "critical"` sí acepta minúsculas.
 
 **Evidencia:** [reporte de evidencias](evidencias/index.html), buscar `@DEF-04`: la respuesta de `getAll` con `meter_id: "m-109"` (`count: 0`). Las búsquedas de control `"109"` y `"M-109"` (1 fila) están en `@CN-10`.
+
+**Causa raíz:** `backend/internal/meter/service.go` línea 59: `strings.Contains(sm.MeterID, search)` sin normalizar mayúsculas; `Normalize` (`dto.go` línea 44) solo aplica `TrimSpace` al `meter_id`. `TestGetAllFilters` prueba búsqueda parcial y `status` en minúsculas, pero no `meter_id` en minúsculas.
+
+**Detección automática:** Go `TestQA_SearchIsCaseInsensitive`; Playwright [`busqueda-medidor.feature`](../e2e/features/api/busqueda-medidor.feature) (particiones de equivalencia sobre `meter_id`; la fila `m-109` en un bloque `Ejemplos` con `@fail`).
 
 ---
 
@@ -172,9 +188,13 @@ Valores límite relacionados: `page: 0` y `size: 0` se corrigen en silencio a 1 
 
 **Evidencia:** [reporte de evidencias](evidencias/index.html), buscar `@DEF-05`: la respuesta 500 a `page: -1`. Los valores límite `page: 0`, `size: 0` y `size: 101` están en `@CN-06`. La línea del log del backend está citada arriba.
 
+**Causa raíz:** `backend/internal/httpx/paging.go` líneas 23–35: `Normalize` valida `size` pero no `page < 1`. `Paginate` (línea 48) calcula `start = (−1−1)×10 = −20` y el slice con índice negativo hace panic; `Recover` (`middleware.go` línea 47) lo convierte en 500.
+
+**Detección automática:** Go `TestQA_NormalizeRejectsNegativePage` y `TestQA_PaginateNegativePageDoesNotPanic`; Playwright [`paginacion-api.feature`](../e2e/features/api/paginacion-api.feature) (valores límite de `page` y `size`, con `@fail` en el caso negativo).
+
 ---
 
-## OBSERVACIÓN-01 · La severidad de una anomalía real usa `>=` en los umbrales y el README dice "supera"
+## OBS-01 · La severidad de una anomalía real usa `>=` en los umbrales y el README dice "supera"
 
 No lo cuento como defecto porque no se manifiesta con el dataset (M-109 está en +110,5 %).
 
