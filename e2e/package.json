@@ -1,0 +1,23 @@
+{
+  "name": "energia-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright install chromium firefox && bddgen && playwright test",
+    "test": "bddgen && playwright test",
+    "test:api": "bddgen && playwright test --project=api",
+    "test:ui": "bddgen && playwright test --project=chromium --project=firefox --project=chromium-utc --project=chromium-anon",
+    "test:headed": "bddgen && playwright test --project=chromium --headed",
+    "test:evidence": "bddgen && playwright test --trace on --video on",
+    "bdd:check": "bddgen && playwright test --list",
+    "bdd:steps": "bddgen export",
+    "typecheck": "tsc -p tsconfig.json",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^22.0.0",
+    "playwright-bdd": "^9.2.1",
+    "typescript": "^5.9.0"
+  }
+}
